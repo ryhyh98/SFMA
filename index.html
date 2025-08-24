@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>스마트공장 수준 진단</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { padding: 2rem; }
+        .question-group { margin-bottom: 2rem; }
+        #result-section { display: none; margin-top: 2rem; }
+        .final-level { font-size: 2rem; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="mb-4">스마트공장 수준 진단</h1>
+
+        <!-- 설문자 정보 입력 -->
+        <div id="surveyor-section">
+            <div class="mb-3">
+                <label for="surveyorName" class="form-label">진단자 이름</label>
+                <input type="text" class="form-control" id="surveyorName" placeholder="이름을 입력하세요">
+            </div>
+            <button id="start-survey-btn" class="btn btn-primary">진단 시작</button>
+        </div>
+
+        <!-- 설문 폼 -->
+        <form id="diagnosis-form" style="display: none;">
+            <div id="questions-container"></div>
+            <button type="submit" class="btn btn-success">진단 완료</button>
+        </form>
+
+        <!-- 결과 표시 -->
+        <div id="result-section">
+            <h2 class="mb-4">스마트공장 수준 진단 결과</h2>
+            <div class="row">
+                <div class="col-md-7">
+                    <table class="table table-bordered">
+                        <thead>
+                            <tr>
+                                <th>영역</th>
+                                <th>배점</th>
+                                <th>수준</th>
+                                <th>점수(점)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="result-table-body"></tbody>
+                        <tfoot>
+                            <tr class="table-info">
+                                <td><strong>합계</strong></td>
+                                <td id="total-allocation"></td>
+                                <td id="total-level"></td>
+                                <td id="total-score"></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                    <div class="text-center p-3 bg-dark text-white">
+                        <span>스마트공장 수준</span>
+                        <span id="final-level" class="final-level ms-3"></span>
+                    </div>
+                </div>
+                <div class="col-md-5">
+                    <canvas id="result-chart"></canvas>
+                </div>
+            </div>
+             <div class="mt-4">
+                <button id="pdf-download-btn" class="btn btn-info">PDF로 저장</button>
+                <button id="excel-download-btn" class="btn btn-info">Excel로 저장</button>
+                <button class="btn btn-warning">이메일로 전송</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let questionsData = [];
+        let diagnosisResult = {};
+
+        document.getElementById('start-survey-btn').addEventListener('click', async () => {
+            const surveyorName = document.getElementById('surveyorName').value;
+            if (!surveyorName) {
+                alert('진단자 이름을 입력하세요.');
+                return;
+            }
+
+            document.getElementById('surveyor-section').style.display = 'none';
+            document.getElementById('diagnosis-form').style.display = 'block';
+
+            try {
+                const response = await fetch('/api/questions');
+                questionsData = await response.json();
+                const container = document.getElementById('questions-container');
+                let currentCategory = '';
+
+                questionsData.forEach(q => {
+                    if (q.대분류 !== currentCategory) {
+                        currentCategory = q.대분류;
+                        const categoryHeader = document.createElement('h4');
+                        categoryHeader.textContent = currentCategory;
+                        categoryHeader.className = 'mt-4';
+                        container.appendChild(categoryHeader);
+                    }
+
+                    const group = document.createElement('div');
+                    group.className = 'question-group';
+                    group.innerHTML = `<label class="form-label"><strong>${q.평가항목}</strong>: 귀사의 수준에 맞는 내용을 선택하십시오.</label>`;
+
+                    const select = document.createElement('select');
+                    select.className = 'form-select';
+                    select.name = q.No;
+                    select.required = true;
+
+                    for (let i = 0; i <= 5; i++) {
+                        const option = document.createElement('option');
+                        option.value = q[`Level${i}`];
+                        option.textContent = `Level${i}: ${q[`select${i}`]}`;
+                        option.dataset.levelIndex = i;
+                        select.appendChild(option);
+                    }
+                    group.appendChild(select);
+                    container.appendChild(group);
+                });
+            } catch (error) {
+                console.error('Error fetching questions:', error);
+                alert('질문을 불러오는 데 실패했습니다.');
+            }
+        });
+
+        document.getElementById('diagnosis-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const surveyorName = document.getElementById('surveyorName').value;
+            const answers = {};
+            const formElements = e.target.elements;
+
+            for (const element of formElements) {
+                if (element.tagName === 'SELECT') {
+                    const selectedOption = element.options[element.selectedIndex];
+                    answers[element.name] = {
+                        value: parseFloat(selectedOption.value),
+                        levelIndex: parseInt(selectedOption.dataset.levelIndex, 10)
+                    };
+                }
+            }
+
+            try {
+                const response = await fetch('/api/submit_diagnosis', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ surveyorName, answers })
+                });
+
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                
+                diagnosisResult = await response.json();
+                displayResults(diagnosisResult);
+
+            } catch (error) {
+                console.error('Error submitting diagnosis:', error);
+                alert('진단 결과를 제출하는 데 실패했습니다.');
+            }
+        });
+
+        function displayResults(result) {
+            document.getElementById('diagnosis-form').style.display = 'none';
+            document.getElementById('result-section').style.display = 'block';
+
+            const tableBody = document.getElementById('result-table-body');
+            tableBody.innerHTML = '';
+
+            const categoryLevels = result.categoryLevels;
+            const categoryScores = result.categoryScores;
+            const categoryAllocations = result.categoryScoreAllocations;
+            const labels = Object.keys(categoryLevels);
+            const levelData = Object.values(categoryLevels);
+
+            let totalLevelSum = 0;
+            let totalAllocation = 0;
+
+            labels.forEach(label => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${label}</td>
+                    <td>${categoryAllocations[label]}</td>
+                    <td>${categoryLevels[label]}</td>
+                    <td>${categoryScores[label]}</td>
+                `;
+                tableBody.appendChild(row);
+                totalLevelSum += categoryLevels[label];
+                totalAllocation += categoryAllocations[label];
+            });
+
+            const averageLevel = (totalLevelSum / labels.length).toFixed(2);
+            document.getElementById('total-level').textContent = averageLevel;
+            document.getElementById('total-score').textContent = result.totalScore;
+            document.getElementById('total-allocation').textContent = totalAllocation;
+
+            const finalLevel = getFinalLevelName(result.totalScore);
+            document.getElementById('final-level').textContent = finalLevel;
+
+            // Bar Chart
+            const ctx = document.getElementById('result-chart').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '영역별 수준',
+                        data: levelData,
+                        backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 5
+                        }
+                    }
+                }
+            });
+        }
+
+        document.getElementById('pdf-download-btn').addEventListener('click', async () => {
+            const response = await fetch('/api/download_pdf', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(diagnosisResult)
+            });
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${diagnosisResult.id}_진단결과.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+        });
+
+        document.getElementById('excel-download-btn').addEventListener('click', async () => {
+            const response = await fetch('/api/download_excel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(diagnosisResult)
+            });
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${diagnosisResult.id}_진단결과.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+        });
+
+        function getFinalLevelName(score) {
+            if (score < 550) return 'Level 0';
+            if (score < 650) return 'Level 1';
+            if (score < 750) return 'Level 2';
+            if (score < 850) return 'Level 3';
+            if (score < 950) return 'Level 4';
+            return 'Level 5';
+        }
+
+    </script>
+</body>
+</html>
