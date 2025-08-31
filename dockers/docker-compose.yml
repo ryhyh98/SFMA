@@ -1,0 +1,12 @@
+services:
+  fastapi:
+    build:
+      context: .
+      args:
+        GIT_BRANCH_NAME: ${GIT_BRANCH_NAME}
+        APP_DIR_NAME: ${APP_DIR_NAME}      
+        GIT_URI: ${GIT_URI}      
+      dockerfile: Dockerfile
+    ports:
+      - 8000:8000
+  
